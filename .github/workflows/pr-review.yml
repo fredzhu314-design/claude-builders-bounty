@@ -1,0 +1,89 @@
+name: PR Review Agent
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: "PR URL to review"
+        required: true
+        type: string
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'issue_comment' &&
+       github.event.comment.body =~ '/review' &&
+       github.event.issue.pull_request) ||
+      github.event_name == 'workflow_dispatch'
+
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Determine PR URL
+        id: pr
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "url=${{ inputs.pr_url }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=${{ github.event.issue.pull_request.html_url }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch PR info
+        id: info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_DATA=$(gh pr view "${{ steps.pr.outputs.url }}" \
+            --json title,body,files,additions,deletions,headRefName \
+            --jq '{title: .title, body: .body, files: .files, additions: .additions, deletions: .deletions, branch: .headRefName}')
+          echo "data=$PR_DATA" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DIFF=$(gh pr diff "${{ steps.pr.outputs.url }}")
+          # Escape for JSON
+          echo "content<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$DIFF" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Review with Claude
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            You are a senior code reviewer. Review the following pull request and produce a structured Markdown review comment.
+
+            ## PR: ${{ fromJson(steps.info.outputs.data).title }}
+
+            ${{ fromJson(steps.info.outputs.data).body }}
+
+            ## Changed Files: ${{ fromJson(steps.info.outputs.data).files }} (+${{ fromJson(steps.info.outputs.data).additions }}, -${{ fromJson(steps.info.outputs.data).deletions }})
+
+            ## Diff
+            ```
+            ${{ steps.diff.outputs.content }}
+            ```
+
+            Produce a structured review with:
+            1. **Summary** (2-3 sentences of what this PR does)
+            2. **Risks** (list of identified risks — security, correctness, performance)
+            3. **Improvement Suggestions** (list of suggestions)
+            4. **Verdict** (APPROVE / REQUEST_CHANGES / COMMENT with brief justification)
+
+            Output ONLY the Markdown review, no preamble or explanation.
+
+      - name: Post review comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${{ steps.pr.outputs.url }}" \
+            --body "${{ steps.review.outputs.result }}"
