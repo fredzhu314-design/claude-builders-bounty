@@ -33,26 +33,29 @@ jobs:
             echo "url=${{ github.event.issue.pull_request.html_url }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Fetch PR info
-        id: info
+      - name: Fetch PR info and diff
+        id: fetch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PR_DATA=$(gh pr view "${{ steps.pr.outputs.url }}" \
-            --json title,body,files,additions,deletions,headRefName \
-            --jq '{title: .title, body: .body, files: .files, additions: .additions, deletions: .deletions, branch: .headRefName}')
-          echo "data=$PR_DATA" >> "$GITHUB_OUTPUT"
+          PR_URL="${{ steps.pr.outputs.url }}"
+          TITLE=$(gh pr view "$PR_URL" --json title -q '.title')
+          BODY=$(gh pr view "$PR_URL" --json body -q '.body')
+          FILES=$(gh pr view "$PR_URL" --json files -q '.files | length')
+          ADDITIONS=$(gh pr view "$PR_URL" --json additions -q '.additions')
+          DELETIONS=$(gh pr view "$PR_URL" --json deletions -q '.deletions')
+          DIFF=$(gh pr diff "$PR_URL")
 
-      - name: Fetch PR diff
-        id: diff
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          DIFF=$(gh pr diff "${{ steps.pr.outputs.url }}")
-          # Escape for JSON
-          echo "content<<EOF" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "body<<BODY_EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "BODY_EOF" >> "$GITHUB_OUTPUT"
+          echo "files=$FILES" >> "$GITHUB_OUTPUT"
+          echo "additions=$ADDITIONS" >> "$GITHUB_OUTPUT"
+          echo "deletions=$DELETIONS" >> "$GITHUB_OUTPUT"
+          echo "diff<<DIFF_EOF" >> "$GITHUB_OUTPUT"
           echo "$DIFF" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "DIFF_EOF" >> "$GITHUB_OUTPUT"
 
       - name: Review with Claude
         id: review
@@ -62,15 +65,15 @@ jobs:
           prompt: |
             You are a senior code reviewer. Review the following pull request and produce a structured Markdown review comment.
 
-            ## PR: ${{ fromJson(steps.info.outputs.data).title }}
+            ## PR: ${{ steps.fetch.outputs.title }}
 
-            ${{ fromJson(steps.info.outputs.data).body }}
+            ${{ steps.fetch.outputs.body }}
 
-            ## Changed Files: ${{ fromJson(steps.info.outputs.data).files }} (+${{ fromJson(steps.info.outputs.data).additions }}, -${{ fromJson(steps.info.outputs.data).deletions }})
+            ## Changed Files: ${{ steps.fetch.outputs.files }} (+${{ steps.fetch.outputs.additions }}, -${{ steps.fetch.outputs.deletions }})
 
             ## Diff
             ```
-            ${{ steps.diff.outputs.content }}
+            ${{ steps.fetch.outputs.diff }}
             ```
 
             Produce a structured review with:
