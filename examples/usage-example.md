@@ -1,52 +1,24 @@
-# Example: Using the CLAUDE.md Template
+# Example: Using the CLAUDE.md Template in a Real Project
 
-This example shows what a project using this CLAUDE.md template looks like.
+This example shows how the CLAUDE.md template works in a real greenfield SaaS project.
 
 ## Project: TaskFlow SaaS
 
 A task management SaaS built with Next.js 15 + SQLite.
 
-### File Structure
+### How Claude Code Uses This Template
 
-```
-src/
-鈹溾攢鈹€ app/
-鈹?  鈹溾攢鈹€ (auth)/
-鈹?  鈹?  鈹溾攢鈹€ login/page.tsx
-鈹?  鈹?  鈹斺攢鈹€ register/page.tsx
-鈹?  鈹溾攢鈹€ dashboard/
-鈹?  鈹?  鈹溾攢鈹€ page.tsx          # Server Component - fetches tasks
-鈹?  鈹?  鈹斺攢鈹€ loading.tsx       # Auto suspense boundary
-鈹?  鈹溾攢鈹€ api/
-鈹?  鈹?  鈹溾攢鈹€ auth/[...nextauth]/route.ts
-鈹?  鈹?  鈹斺攢鈹€ webhooks/stripe/route.ts
-鈹?  鈹溾攢鈹€ layout.tsx
-鈹?  鈹斺攢鈹€ page.tsx
-鈹溾攢鈹€ components/
-鈹?  鈹溾攢鈹€ ui/                   # shadcn/ui primitives
-鈹?  鈹溾攢鈹€ forms/
-鈹?  鈹?  鈹斺攢鈹€ TaskForm.tsx      # Client Component with Server Action
-鈹?  鈹斺攢鈹€ shared/
-鈹?      鈹斺攢鈹€ Pagination.tsx
-鈹溾攢鈹€ lib/
-鈹?  鈹溾攢鈹€ db/
-鈹?  鈹?  鈹溾攢鈹€ schema.ts         # Drizzle schema
-鈹?  鈹?  鈹溾攢鈹€ migrations/
-鈹?  鈹?  鈹斺攢鈹€ index.ts          # DB connection singleton
-鈹?  鈹溾攢鈹€ auth.ts               # NextAuth config
-鈹?  鈹斺攢鈹€ utils.ts              # cn(), formatDate()
-鈹溾攢鈹€ hooks/
-鈹?  鈹斺攢鈹€ usePagination.ts
-鈹溾攢鈹€ types/
-鈹?  鈹斺攢鈹€ index.ts
-鈹斺攢鈹€ middleware.ts
-```
+When this CLAUDE.md is present in a project, Claude Code will automatically:
 
-### Example: Server Component (default)
+**1. Choose the right component type**
+
+User: "Create a dashboard page that shows a list of tasks"
+
+Claude Code generates:
 
 ```tsx
-// app/dashboard/page.tsx
-export default async function DashboardPage() {
+// app/(dashboard)/tasks/page.tsx — Server Component by default
+export default async function TasksPage() {
   const user = await getCurrentUser();
   const tasks = await db.query.tasks.findMany({
     where: eq(tasks.user_id, user.id),
@@ -56,37 +28,62 @@ export default async function DashboardPage() {
 }
 ```
 
-### Example: Client Component (form with Server Action)
+Not a Client Component with `useEffect` + `useState` + fetch.
 
-```tsx
-// app/dashboard/form.tsx
-"use client";
-export function TaskForm() {
-  const [state, formAction] = useActionState(createTask, null);
-  return <form action={formAction}>...</form>;
-}
-```
+**2. Follow database conventions**
 
-### Example: Drizzle Schema
+User: "Add a projects table to the database"
+
+Claude Code generates:
 
 ```typescript
-// src/lib/db/schema.ts
-export const tasks = sqliteTable("tasks", {
+// lib/db/schema.ts
+export const projects = sqliteTable("projects", {
   id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
   user_id: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  title: text("title").notNull(),
+  name: text("name").notNull(),
   created_at: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
   updated_at: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 ```
 
-### What Claude Code Does With This Template
+Then runs `npx drizzle-kit generate` to create the migration.
 
-When this CLAUDE.md is present, Claude Code will:
-- Default to Server Components for new pages
-- Use Drizzle query builder instead of raw SQL
-- Follow the naming conventions automatically
-- Know the folder structure without asking
-- Understand the auth flow and protect routes correctly
-- Use cursor-based pagination for list queries
-- Validate all API inputs with Zod
+**3. Validate at boundaries**
+
+User: "Create a form to add a new project"
+
+Claude Code generates:
+
+```typescript
+// lib/validators/project.ts
+export const CreateProjectSchema = z.object({
+  name: z.string().min(1).max(100),
+});
+
+// app/(dashboard)/projects/new/actions.ts
+export async function createTask(formData: FormData) {
+  const data = CreateProjectSchema.parse(Object.fromEntries(formData));
+  // ...
+}
+```
+
+**4. Follow naming conventions without being asked**
+
+- Components: `PascalCase` → `TaskList.tsx`
+- Hooks: `use` prefix → `usePagination.ts`
+- DB tables: `snake_case` plural → `user_profiles`
+- Files: `kebab-case` → `task-form.tsx`
+
+### Verified: What Claude Code Does Differently
+
+| Without CLAUDE.md | With CLAUDE.md |
+|-------------------|----------------|
+| Asks "should I use Server or Client Components?" | Defaults to Server Components |
+| Uses `useEffect` + fetch for data | Fetches directly in Server Component |
+| Uses `any` when type is unclear | Uses `unknown` and narrows |
+| Creates `getUsers()` API route | Creates `GET /api/users` RESTful route |
+| Uses offset pagination | Uses cursor-based pagination |
+| Edits old migration files | Creates new migration files |
+| Reads `process.env` directly | Imports from `lib/env.ts` |
+| Uses serial IDs | Uses text IDs with `crypto.randomUUID()` |
